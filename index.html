@@ -1,10 +1,229 @@
 <!DOCTYPE html>
 <html>
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Football Manager</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; background: #0d1117; color: #e6edf3; margin: 0; padding: 16px; }
+    h1 { font-size: 1.4em; margin-bottom: 4px; }
+    h2 { font-size: 1.1em; margin-top: 24px; }
+    p.hint { color: #8b949e; margin-top: 0; font-size: 0.9em; }
+
+    #budgetBar { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px; display: flex; justify-content: space-between; align-items: center; font-weight: bold; }
+    #budgetBar span.amount { color: #3fb950; font-size: 1.1em; }
+
+    #worldMap { width: 100%; height: auto; border-radius: 10px; background: #10151c; border: 1px solid #30363d; touch-action: manipulation; }
+    .continent { cursor: pointer; transition: opacity 0.15s; }
+    .continent:active, .continent.selected { opacity: 0.7; }
+    .continent-label { fill: #e6edf3; font-size: 11px; font-weight: bold; pointer-events: none; text-anchor: middle; }
+
+    #regionPanel { margin-top: 12px; }
+    .region-btn { display: block; width: 100%; text-align: left; background: #161b22; color: #e6edf3; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin: 6px 0; font-size: 0.95em; }
+    .region-btn:active { background: #1f6feb33; }
+    .region-btn .region-meta { color: #8b949e; font-size: 0.85em; margin-top: 2px; }
+
+    button.scout-go { font-size: 1em; padding: 10px; border-radius: 8px; border: none; background: #238636; color: white; font-weight: bold; width: 100%; margin-top: 6px; }
+    button.scout-go:active { background: #2ea043; }
+
+    .player-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px; margin: 8px 0; }
+    .player-card h3 { margin: 0 0 4px 0; }
+    .stat-row { display: flex; justify-content: space-between; font-size: 0.9em; color: #8b949e; }
+    .shortlist-btn { background: #1f6feb; margin-top: 8px; width: 100%; border: none; color: white; padding: 8px; border-radius: 6px; font-weight: bold; }
+    .sign-btn { background: #238636; margin-top: 6px; width: 100%; border: none; color: white; padding: 8px; border-radius: 6px; font-weight: bold; }
+    .release-btn { background: #da3633; margin-top: 6px; width: 100%; border: none; color: white; padding: 8px; border-radius: 6px; font-weight: bold; }
+    .tag { display: inline-block; background: #30363d; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; margin-right: 4px; }
+    .toast { position: fixed; bottom: 16px; left: 16px; right: 16px; background: #238636; color: white; padding: 12px; border-radius: 8px; text-align: center; font-weight: bold; }
+  </style>
 </head>
 <body>
   <h1>⚽ My Football Manager Game</h1>
-  <p>Coming soon...</p>
+
+  <div id="budgetBar">
+    <span>💰 Transfer Budget</span>
+    <span class="amount" id="budgetAmount">$0</span>
+  </div>
+
+  <h2>Squad (<span id="squadCount">0</span>)</h2>
+  <div id="squad"><p style="color:#8b949e">No players signed yet.</p></div>
+
+  <h2>Scout a Region</h2>
+  <p class="hint">Tap a continent on the map to scout for players.</p>
+  <svg id="worldMap" viewBox="0 0 400 220" xmlns="http://www.w3.org/2000/svg">
+    <rect class="continent" data-key="NorthCentralAmerica" x="20" y="30" width="75" height="70" rx="10" fill="#3fb950"/>
+    <text class="continent-label" x="57" y="70">N/C AMERICA</text>
+    <rect class="continent" data-key="SouthAmerica" x="70" y="110" width="55" height="80" rx="10" fill="#58a6ff"/>
+    <text class="continent-label" x="97" y="153">S AMERICA</text>
+    <rect class="continent" data-key="Europe" x="175" y="25" width="55" height="45" rx="10" fill="#db6d28"/>
+    <text class="continent-label" x="202" y="50">EUROPE</text>
+    <rect class="continent" data-key="Africa" x="175" y="80" width="65" height="90" rx="10" fill="#f0883e"/>
+    <text class="continent-label" x="207" y="128">AFRICA</text>
+    <rect class="continent" data-key="Asia" x="245" y="25" width="105" height="85" rx="10" fill="#a371f7"/>
+    <text class="continent-label" x="297" y="70">ASIA</text>
+    <rect class="continent" data-key="Oceania" x="290" y="150" width="70" height="45" rx="10" fill="#f778ba"/>
+    <text class="continent-label" x="325" y="175">OCEANIA</text>
+  </svg>
+
+  <div id="regionPanel"></div>
+  <div id="results"></div>
+
+  <h2>📋 Shortlist</h2>
+  <div id="shortlist"><p style="color:#8b949e">No players shortlisted yet.</p></div>
+
+  <script src="script.js"></script>
+  <script>
+    let shortlist = JSON.parse(localStorage.getItem('fm_shortlist') || '[]');
+    let club = FM.loadClub();
+    let selectedRegionId = null;
+
+    function refreshBudget() {
+      document.getElementById('budgetAmount').textContent = '$' + club.budget.toLocaleString();
+    }
+
+    function showToast(msg) {
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.textContent = msg;
+      document.body.appendChild(t);
+      setTimeout(() => t.remove(), 2200);
+    }
+
+    // --- Map interaction ---
+    document.querySelectorAll('.continent').forEach(el => {
+      el.addEventListener('click', () => {
+        document.querySelectorAll('.continent').forEach(c => c.classList.remove('selected'));
+        el.classList.add('selected');
+        showRegionsFor(el.dataset.key);
+      });
+    });
+
+    function showRegionsFor(continentKey) {
+      const regions = FM.REGIONS[continentKey];
+      const panel = document.getElementById('regionPanel');
+      const niceName = continentKey.replace(/([A-Z])/g, ' $1').trim();
+      panel.innerHTML = `<h2>${niceName} — pick a region</h2>`;
+      regions.forEach(r => {
+        const btn = document.createElement('button');
+        btn.className = 'region-btn';
+        btn.innerHTML = `<strong>${r.name}</strong><div class="region-meta">💰 ${r.cost} · ⏱ ${r.days} days</div>`;
+        btn.onclick = () => selectRegion(r.id, btn);
+        panel.appendChild(btn);
+      });
+    }
+
+    function selectRegion(regionId, btnEl) {
+      selectedRegionId = regionId;
+      document.querySelectorAll('.region-btn').forEach(b => b.style.borderColor = '#30363d');
+      btnEl.style.borderColor = '#3fb950';
+
+      let goBtn = document.getElementById('scoutGoBtn');
+      if (!goBtn) {
+        goBtn = document.createElement('button');
+        goBtn.id = 'scoutGoBtn';
+        goBtn.className = 'scout-go';
+        document.getElementById('regionPanel').appendChild(goBtn);
+      }
+      goBtn.textContent = `Send Scout to ${btnEl.querySelector('strong').textContent}`;
+      goBtn.onclick = () => {
+        const players = FM.scoutRegion(selectedRegionId);
+        renderResults(players);
+      };
+    }
+
+    function renderResults(players) {
+      const container = document.getElementById('results');
+      container.innerHTML = '<h2>Scout Report</h2>';
+      players.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'player-card';
+        card.innerHTML = `
+          <h3>${p.name}</h3>
+          <span class="tag">${p.position}</span><span class="tag">Age ${p.age}</span>
+          <div class="stat-row"><span>Technical</span><span>${p.stats.technical}</span></div>
+          <div class="stat-row"><span>Physical</span><span>${p.stats.physical}</span></div>
+          <div class="stat-row"><span>Pace</span><span>${p.stats.pace}</span></div>
+          <div class="stat-row"><span>Overall</span><span>${p.stats.overall}</span></div>
+          <div class="stat-row"><span>Potential</span><span>${p.potential.low}-${p.potential.high}</span></div>
+          <div class="stat-row"><span>Value</span><span>$${p.value.toLocaleString()}</span></div>
+          <button class="shortlist-btn" onclick='addToShortlist(${JSON.stringify(p)})'>+ Add to Shortlist</button>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function addToShortlist(player) {
+      if (shortlist.find(p => p.id === player.id)) return;
+      shortlist.push(player);
+      localStorage.setItem('fm_shortlist', JSON.stringify(shortlist));
+      renderShortlist();
+    }
+
+    function signFromShortlist(playerId) {
+      const player = shortlist.find(p => p.id === playerId);
+      if (!player) return;
+      const result = FM.signPlayer(player);
+      showToast(result.message);
+      if (result.success) {
+        club = FM.loadClub();
+        shortlist = shortlist.filter(p => p.id !== playerId);
+        localStorage.setItem('fm_shortlist', JSON.stringify(shortlist));
+        refreshBudget();
+        renderShortlist();
+        renderSquad();
+      }
+    }
+
+    function releaseFromSquad(playerId) {
+      const result = FM.releasePlayer(playerId);
+      showToast(result.message);
+      club = FM.loadClub();
+      refreshBudget();
+      renderSquad();
+    }
+
+    function renderShortlist() {
+      const container = document.getElementById('shortlist');
+      if (shortlist.length === 0) {
+        container.innerHTML = '<p style="color:#8b949e">No players shortlisted yet.</p>';
+        return;
+      }
+      container.innerHTML = '';
+      shortlist.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'player-card';
+        card.innerHTML = `
+          <h3>${p.name}</h3>
+          <span class="tag">${p.position}</span><span class="tag">OVR ${p.stats.overall}</span>
+          <div class="stat-row"><span>Value</span><span>$${p.value.toLocaleString()}</span></div>
+          <button class="sign-btn" onclick="signFromShortlist('${p.id}')">✅ Sign Player</button>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    function renderSquad() {
+      const container = document.getElementById('squad');
+      document.getElementById('squadCount').textContent = club.squad.length;
+      if (club.squad.length === 0) {
+        container.innerHTML = '<p style="color:#8b949e">No players signed yet.</p>';
+        return;
+      }
+      container.innerHTML = '';
+      club.squad.forEach(p => {
+        const card = document.createElement('div');
+        card.className = 'player-card';
+        card.innerHTML = `
+          <h3>${p.name}</h3>
+          <span class="tag">${p.position}</span><span class="tag">Age ${p.age}</span><span class="tag">OVR ${p.stats.overall}</span>
+          <button class="release-btn" onclick="releaseFromSquad('${p.id}')">Release Player</button>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    refreshBudget();
+    renderShortlist();
+    renderSquad();
+  </script>
 </body>
 </html>
